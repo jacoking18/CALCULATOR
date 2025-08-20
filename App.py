@@ -1,11 +1,11 @@
 # app.py
-# CAPNOW Syndication Deal Calculator (Tabbed UI, v2)
+# CAPNOW Syndication Deal Calculator (Tabbed UI, v2.1)
 # --------------------------------------------------
-# Rules:
-# - Payback = Funding * Rate (no override)
-# - Origination Fee = % of Funding (Day 1 -> Capnow); UI shows % and $ side-by-side
+# - Payback = Funding * Rate
+# - Origination Fee = % of Funding (Day 1 -> Capnow) + live $ display
 # - ACH Program Fee = fixed $ (Day 1 -> Capnow)
 # - Broker Commission = % of Funding (Day 1 paid by investors, proportional to their split)
+#   >>> NOW shows live $ amount next to the % in the Deal tab
 # - Tracker Fees = % skim from each investor's daily share of collections
 # - Schedule can be business days (Mon–Fri) or calendar days
 
@@ -112,7 +112,7 @@ def compute_schedule(
     capnow_upfront = dollars(orig_fee_capnow + ach_fee_capnow)
     capnow_total = dollars(capnow_upfront + capnow_tracker_total)
 
-    # Investor economics (Day‑1 cash out = principal + broker share)
+    # Investor economics (Day-1 cash out = principal + broker share)
     investor_day1_cash = {}
     investor_profit = {}
     investor_roi = {}
@@ -152,7 +152,7 @@ def compute_schedule(
                 "Deal %": round(100 * s["pct"], 2),
                 "Invested Principal": invested_principal[name],
                 "Broker Share (Day 1)": broker_split[name],
-                "Total Day‑1 Cash Out": investor_day1_cash[name],
+                "Total Day-1 Cash Out": investor_day1_cash[name],
                 "Collections Net (after tracker)": dollars(investor_collections_net[name]),
                 "Profit": investor_profit[name],
                 "ROI_%": investor_roi[name],
@@ -162,7 +162,7 @@ def compute_schedule(
         },
     }
 
-    return df, summaries, orig_fee_capnow, broker_comm_total
+    return df, summaries
 
 # ---------- UI ----------
 st.set_page_config(page_title="CAPNOW Syndication Calculator", page_icon="💸", layout="wide")
@@ -183,7 +183,6 @@ with tab_deal:
         use_biz = st.toggle("Use Business Days (Mon–Fri)", value=True)
     with c3:
         rate = st.number_input("Rate (×)", min_value=1.0, value=1.48, step=0.01, format="%.2f")
-        # Display computed Payback (read-only metric look)
         st.caption("Computed Payback")
         st.info(f"${funding * rate:,.2f}")
     with c4:
@@ -196,13 +195,19 @@ with tab_deal:
     with c5:
         ach_fee = st.number_input("ACH Program Fee ($) → Capnow (Day 1)", min_value=0.0, value=395.0, step=25.0, format="%.2f")
     with c6:
-        broker_pct = st.number_input("Broker Commission (% of Funding, Day 1 by Investors)", min_value=0.0, value=7.0, step=0.5, format="%.2f")
-        st.caption("Charged to investors Day‑1, proportional to their deal %.")
+        broker_pct = st.number_input(
+            "Broker Commission (% of Funding, Day 1 by Investors)",
+            min_value=0.0, value=7.0, step=0.5, format="%.2f"
+        )
+        broker_val = dollars(funding * (broker_pct / 100.0))  # <<< NEW live dollar calc
+        st.caption("Broker Commission $ (auto)")
+        st.info(f"${broker_val:,.2f}")
+        st.caption("Charged to investors Day-1, proportional to their deal %.")
 
 # Syndicators tab
 with tab_syn:
     st.subheader("Syndicator Splits & Tracker Fees")
-    st.caption("The % of Deal must total 100%. Tracker fee is skimmed daily from each investor’s share of each day’s collection.")
+    st.caption("The % of Deal must total 100%. Tracker fee is skimmed daily from each investor’s share.")
     default_rows = [
         {"Name": "Jacobo", "Percent_of_Deal": 50.0, "Tracker_Fee_%": 5.0},
         {"Name": "Albert", "Percent_of_Deal": 50.0, "Tracker_Fee_%": 4.0},
@@ -230,7 +235,7 @@ with tab_results:
         st.warning("Fix Syndicators before viewing results.")
         st.stop()
 
-    df, summaries, orig_fee_dollar, broker_total_dollar = compute_schedule(
+    df, summaries = compute_schedule(
         start_dt=start_date,
         funding=float(funding),
         rate=float(rate),
@@ -269,7 +274,7 @@ with tab_results:
             st.metric(f"{name} — Deal %", f"{v['Deal %']:.2f}%")
             st.metric(f"{name} — Invested Principal", f"${v['Invested Principal']:,.2f}")
             st.metric(f"{name} — Broker (Day 1)", f"${v['Broker Share (Day 1)']:,.2f}")
-            st.metric(f"{name} — Day‑1 Cash Out", f"${v['Total Day‑1 Cash Out']:,.2f}")
+            st.metric(f"{name} — Day-1 Cash Out", f"${v['Total Day-1 Cash Out']:,.2f}")
             st.metric(f"{name} — Collections Net", f"${v['Collections Net (after tracker)']:,.2f}")
             st.metric(f"{name} — Profit", f"${v['Profit']:,.2f}")
             st.metric(f"{name} — ROI", f"{v['ROI_%']:.2f}%")
