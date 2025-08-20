@@ -1,11 +1,15 @@
 # app.py
-# CAPNOW Syndication Deal Calculator (Tabbed UI, v2.1)
+# CAPNOW Syndication Deal Calculator (Tabbed UI, v2.2)
 # --------------------------------------------------
+# What's new:
+# - Results show "Merchant Nets" (Funding − Origination$ − ACH$)
+# - Per-syndicator fees table: Broker (Day-1), Tracker (Total), Total Fees
+#
+# Rules recap:
 # - Payback = Funding * Rate
-# - Origination Fee = % of Funding (Day 1 -> Capnow) + live $ display
+# - Origination Fee = % of Funding (Day 1 -> Capnow)
 # - ACH Program Fee = fixed $ (Day 1 -> Capnow)
-# - Broker Commission = % of Funding (Day 1 paid by investors, proportional to their split)
-#   >>> NOW shows live $ amount next to the % in the Deal tab
+# - Broker Commission = % of Funding (Day 1 paid by investors, proportional to split)
 # - Tracker Fees = % skim from each investor's daily share of collections
 # - Schedule can be business days (Mon–Fri) or calendar days
 
@@ -80,9 +84,10 @@ def compute_schedule(
     invested_principal = {s["name"]: dollars(funding * s["pct"]) for s in syns}
     per_inv_daily_gross = {s["name"]: dollars(daily_payment * s["pct"]) for s in syns}
 
-    # Build schedule
+    # Build schedule & accumulate tracker totals (per investor)
     rows = []
     investor_collections_net = {s["name"]: 0.0 for s in syns}
+    investor_tracker_totals = {s["name"]: 0.0 for s in syns}
     capnow_tracker_total = 0.0
 
     for i, d in enumerate(dates, start=1):
@@ -92,7 +97,7 @@ def compute_schedule(
         for s in syns:
             name = s["name"]
             gross = per_inv_daily_gross[name]
-            tracker_fee = dollars(gross * s["tracker"])
+            tracker_fee = dollars(gross * s["tracker"])        # round per day
             net_to_investor = dollars(gross - tracker_fee)
 
             row[f"{name}_Gross"] = gross
@@ -100,6 +105,7 @@ def compute_schedule(
             row[f"{name}_NetToInvestor"] = net_to_investor
 
             investor_collections_net[name] = dollars(investor_collections_net[name] + net_to_investor)
+            investor_tracker_totals[name] = dollars(investor_tracker_totals[name] + tracker_fee)
             capnow_today += tracker_fee
 
         row["Capnow_Tracker_Fees"] = dollars(capnow_today)
@@ -108,9 +114,10 @@ def compute_schedule(
 
     df = pd.DataFrame(rows)
 
-    # Capnow totals
+    # Capnow & client (merchant) totals
     capnow_upfront = dollars(orig_fee_capnow + ach_fee_capnow)
     capnow_total = dollars(capnow_upfront + capnow_tracker_total)
+    merchant_nets = dollars(funding - orig_fee_capnow - ach_fee_capnow)
 
     # Investor economics (Day-1 cash out = principal + broker share)
     investor_day1_cash = {}
@@ -147,11 +154,16 @@ def compute_schedule(
             "Tracker Fees (over term)": capnow_tracker_total,
             "Total Revenue": capnow_total,
         },
+        "Client": {
+            "Merchant Nets": merchant_nets
+        },
         "Investors": {
             name: {
                 "Deal %": round(100 * s["pct"], 2),
                 "Invested Principal": invested_principal[name],
-                "Broker Share (Day 1)": broker_split[name],
+                "Broker Share (Day 1)": broker_split[name],                 # Paid by investor (to broker)
+                "Tracker Fees (Total → Capnow)": investor_tracker_totals[name],
+                "Total Fees Paid": dollars(broker_split[name] + investor_tracker_totals[name]),
                 "Total Day-1 Cash Out": investor_day1_cash[name],
                 "Collections Net (after tracker)": dollars(investor_collections_net[name]),
                 "Profit": investor_profit[name],
@@ -199,7 +211,7 @@ with tab_deal:
             "Broker Commission (% of Funding, Day 1 by Investors)",
             min_value=0.0, value=7.0, step=0.5, format="%.2f"
         )
-        broker_val = dollars(funding * (broker_pct / 100.0))  # <<< NEW live dollar calc
+        broker_val = dollars(funding * (broker_pct / 100.0))
         st.caption("Broker Commission $ (auto)")
         st.info(f"${broker_val:,.2f}")
         st.caption("Charged to investors Day-1, proportional to their deal %.")
@@ -248,13 +260,14 @@ with tab_results:
     )
 
     st.subheader("Summary")
-    inp, fees, cap, inv = summaries["Inputs"], summaries["Fees"], summaries["Capnow"], summaries["Investors"]
+    inp, fees, cap, client, inv = summaries["Inputs"], summaries["Fees"], summaries["Capnow"], summaries["Client"], summaries["Investors"]
 
-    m1, m2, m3, m4 = st.columns(4)
+    m1, m2, m3, m4, m5 = st.columns(5)
     with m1: st.metric("Funding Amount", f"${inp['Funding Amount']:,.2f}")
     with m2: st.metric("Payback (Funding × Rate)", f"${inp['Payback']:,.2f}")
     with m3: st.metric("Daily Payment", f"${inp['Daily Payment']:,.2f}")
     with m4: st.metric("Term Days", f"{inp['Term Days']} {'(Biz)' if inp['Business Days'] else '(Cal)'}")
+    with m5: st.metric("Merchant Nets", f"${client['Merchant Nets']:,.2f}")
 
     f1, f2, f3, f4 = st.columns(4)
     with f1: st.metric("Origination % of Funding", f"{fees['Origination % of Funding (Day 1)']:.2f}%")
@@ -274,10 +287,27 @@ with tab_results:
             st.metric(f"{name} — Deal %", f"{v['Deal %']:.2f}%")
             st.metric(f"{name} — Invested Principal", f"${v['Invested Principal']:,.2f}")
             st.metric(f"{name} — Broker (Day 1)", f"${v['Broker Share (Day 1)']:,.2f}")
+            st.metric(f"{name} — Tracker (Total → Capnow)", f"${v['Tracker Fees (Total → Capnow)']:,.2f}")
+            st.metric(f"{name} — Total Fees Paid", f"${v['Total Fees Paid']:,.2f}")
             st.metric(f"{name} — Day-1 Cash Out", f"${v['Total Day-1 Cash Out']:,.2f}")
             st.metric(f"{name} — Collections Net", f"${v['Collections Net (after tracker)']:,.2f}")
             st.metric(f"{name} — Profit", f"${v['Profit']:,.2f}")
             st.metric(f"{name} — ROI", f"{v['ROI_%']:.2f}%")
+
+    # Compact table: per-syndicator fees
+    st.markdown("### Per-Syndicator Fees Breakdown")
+    fees_rows = []
+    for name, v in inv.items():
+        fees_rows.append({
+            "Syndicator": name,
+            "Broker (Day-1)": v["Broker Share (Day 1)"],
+            "Tracker (Total → Capnow)": v["Tracker Fees (Total → Capnow)"],
+            "Total Fees Paid": v["Total Fees Paid"],
+        })
+    fees_df = pd.DataFrame(fees_rows)
+    fees_df[["Broker (Day-1)", "Tracker (Total → Capnow)", "Total Fees Paid"]] = \
+        fees_df[["Broker (Day-1)", "Tracker (Total → Capnow)", "Total Fees Paid"]].applymap(lambda x: dollars(x))
+    st.dataframe(fees_df, use_container_width=True)
 
     st.markdown("### Daily Cashflow Schedule")
     st.dataframe(df, use_container_width=True)
@@ -285,5 +315,5 @@ with tab_results:
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Download Daily Schedule (CSV)", data=csv, file_name="syndication_cashflow_schedule.csv", mime="text/csv")
 
-    with st.expander("Raw JSON: Inputs / Fees / Capnow / Investors"):
-        st.json({"Inputs": inp, "Fees": fees, "Capnow": cap, "Investors": inv})
+    with st.expander("Raw JSON: Inputs / Fees / Capnow / Client / Investors"):
+        st.json({"Inputs": inp, "Fees": fees, "Capnow": cap, "Client": client, "Investors": inv})
