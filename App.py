@@ -1,17 +1,13 @@
 # app.py
-# CAPNOW Syndication Deal Calculator (v2.5 — compact inline help next to metrics)
-# ------------------------------------------------------------------------------
-# Changes in this version:
-# - Small "ⓘ" popover next to each investor metric (TOTAL FEES, CAFS, Commission, etc.)
-# - Popover sits in a narrow column to stay visually close and unobtrusive
-#
-# Rules recap:
+# CAPNOW Syndication Deal Calculator (v2.6 — tiny “*” toggles above numbers)
+# -------------------------------------------------------------------------
 # - Payback = Funding * Rate
 # - Origination Fee = % of Funding (Day 1 -> Capnow)
 # - ACH Program Fee = fixed $ (Day 1 -> Capnow)
 # - Broker Commission = % of Funding (Day 1 paid by investors, proportional to split)
-# - Tracker Fees (CAFS) = % skim from each investor's daily share of collections
+# - Tracker Fees (CAFS) skim from each investor's daily share of collections
 # - Business-day or calendar-day schedules
+# - NEW: compact “*” toggle above each investor metric that shows a short explainer
 
 from datetime import date, timedelta
 from typing import List, Dict
@@ -53,21 +49,20 @@ def validate_syndicators(rows: List[Dict]) -> str:
             return f"Tracker fee % for {r.get('Name','(name)')} must be 0–100."
     return ""
 
-def info_pop_in_col(col, label: str, body_md: str):
-    """Render a tiny popover (or expander fallback) inside a given column."""
-    # Try popover on the column; fallback to expander if not available
-    if hasattr(col, "popover"):
-        with col.popover(label):
-            col.markdown(body_md)
-    else:
-        with col.expander(label):
-            col.markdown(body_md)
+# Small helper: metric + tiny star above-right that toggles a caption
+def metric_with_star(key_prefix: str, label: str, value_str: str, help_md: str):
+    # Star row (very thin; right-aligned)
+    s1, s2 = st.columns([0.86, 0.14])
+    star_key = f"{key_prefix}_star"
+    if s2.button("＊", key=star_key, help="Tap for a quick explainer"):
+        st.session_state[star_key] = not st.session_state.get(star_key, False)
 
-def metric_with_help(label: str, value_str: str, help_md: str, widths=(0.82, 0.18)):
-    """Metric on the left, tiny ⓘ help on the right — kept tight and close."""
-    mcol, hcol = st.columns(widths)
-    mcol.metric(label, value_str)
-    info_pop_in_col(hcol, "ⓘ", help_md)
+    # Metric itself
+    st.metric(label, value_str)
+
+    # Inline explainer if toggled
+    if st.session_state.get(star_key, False):
+        st.caption(help_md)
 
 # ---------- Core calc ----------
 def compute_schedule(
@@ -304,43 +299,24 @@ with tab_results:
     for i, (name, v) in enumerate(inv.items()):
         with cols[i]:
             st.markdown(f"**{name}**")
-
-            metric_with_help(
-                "% ON THE DEAL", f"{v['Deal %']:.2f}%",
-                "Investor’s share of the deal capital."
-            )
-            metric_with_help(
-                "Invested Total $", fmt_money(v['Invested Principal']),
-                "Investor’s principal funded into the deal."
-            )
-            metric_with_help(
-                "Commission Paid to Broker", fmt_money(v['Broker Share (Day 1)']),
-                "Due **on Day-1** from the investor: **Funding × Broker% × Investor%**. This goes to the broker."
-            )
-            metric_with_help(
-                "CAFS on Deal", fmt_money(v['Tracker Fees (Total → Capnow)']),
-                "**Collected on each payment.** Sum over term of: **Daily Payment × Investor% × Tracker%**. Paid to Capnow."
-            )
-            metric_with_help(
-                "TOTAL FEES", fmt_money(v['Total Fees Paid']),
-                "**TOTAL FEES = Commission Paid to Broker + CAFS on Deal**"
-            )
-            metric_with_help(
-                "Investment On Day 1", fmt_money(v['Total Day-1 Cash Out']),
-                "**Investment On Day 1 = Invested Principal + Commission Paid to Broker**"
-            )
-            metric_with_help(
-                "Net on Investment", fmt_money(v['Collections Net (after tracker)']),
-                "Total collected by the investor **after tracker fees** across all days."
-            )
-            metric_with_help(
-                "Profit on Investment", fmt_money(v['Profit']),
-                "**Profit = Net on Investment − Investment On Day 1**"
-            )
-            metric_with_help(
-                "ROI on Investment", f"{v['ROI_%']:.2f}%",
-                "**ROI = Profit ÷ Investment On Day 1**"
-            )
+            metric_with_star(f"{name}_dealpct", "% ON THE DEAL", f"{v['Deal %']:.2f}%",
+                             "Investor’s share of the deal capital.")
+            metric_with_star(f"{name}_invested", "Invested Total $", fmt_money(v['Invested Principal']),
+                             "Investor’s principal funded into the deal.")
+            metric_with_star(f"{name}_broker", "Commission Paid to Broker", fmt_money(v['Broker Share (Day 1)']),
+                             "Due **on Day-1** from the investor: **Funding × Broker% × Investor%**. This goes to the broker.")
+            metric_with_star(f"{name}_cafs", "CAFS on Deal", fmt_money(v['Tracker Fees (Total → Capnow)']),
+                             "**Collected on each payment.** Sum over term of: **Daily Payment × Investor% × Tracker%**. Paid to Capnow.")
+            metric_with_star(f"{name}_totalfees", "TOTAL FEES", fmt_money(v['Total Fees Paid']),
+                             "**TOTAL FEES = Commission Paid to Broker + CAFS on Deal**.")
+            metric_with_star(f"{name}_day1", "Investment On Day 1", fmt_money(v['Total Day-1 Cash Out']),
+                             "**Investment On Day 1 = Invested Principal + Commission Paid to Broker**.")
+            metric_with_star(f"{name}_net", "Net on Investment", fmt_money(v['Collections Net (after tracker)']),
+                             "Total collected by the investor **after tracker fees** across all days.")
+            metric_with_star(f"{name}_profit", "Profit on Investment", fmt_money(v['Profit']),
+                             "**Profit = Net on Investment − Investment On Day 1**.")
+            metric_with_star(f"{name}_roi", "ROI on Investment", f"{v['ROI_%']:.2f}%",
+                             "**ROI = Profit ÷ Investment On Day 1**.")
 
     # Per-Investor Fees table
     st.markdown("### Per-Investor Fees")
