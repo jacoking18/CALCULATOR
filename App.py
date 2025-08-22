@@ -1,20 +1,13 @@
 # app.py
-# CAPNOW Syndication Deal Calculator (Tabbed UI, v2.3 - custom labels)
-# -------------------------------------------------------------------
-# Rules recap:
+# CAPNOW Syndication Deal Calculator (Tabbed UI, v2.4 - TOTAL FEES popover)
+# -------------------------------------------------------------------------
 # - Payback = Funding * Rate
 # - Origination Fee = % of Funding (Day 1 -> Capnow)
 # - ACH Program Fee = fixed $ (Day 1 -> Capnow)
 # - Broker Commission = % of Funding (Day 1 paid by investors, proportional to split)
-# - Tracker Fees = % skim from each investor's daily share of collections
+# - Tracker Fees (CAFS) = % skim from each investor's daily share of collections
 # - Business-day or calendar-day schedules
-#
-# UI updates in this version:
-# - Custom metric labels in Investor Results:
-#   "% ON THE DEAL", "Invested Total $", "Commission Paid to Broker",
-#   "CAFS on Deal", "TOTAL FEES", "Investment On Day 1",
-#   "Net on Investment", "Profit on Investment", "ROI on Investment"
-# - Per-Investor fees table with custom column names
+# - NEW: Click-to-open explainer under each investor's "TOTAL FEES"
 
 from datetime import date, timedelta
 from typing import List, Dict
@@ -27,6 +20,9 @@ import streamlit as st
 # ---------- Utils ----------
 def dollars(x: float) -> float:
     return float(np.round((x if x is not None else 0.0) + 1e-12, 2))
+
+def fmt_money(x: float) -> str:
+    return f"${x:,.2f}"
 
 def business_dates(start: date, n: int) -> List[date]:
     out, d = [], start
@@ -52,6 +48,15 @@ def validate_syndicators(rows: List[Dict]) -> str:
         if tf < 0 or tf > 100:
             return f"Tracker fee % for {r.get('Name','(name)')} must be 0–100."
     return ""
+
+def info_pop(label: str, body_md: str):
+    """Show a popover if available; fallback to expander."""
+    if hasattr(st, "popover"):
+        with st.popover(label):
+            st.markdown(body_md)
+    else:
+        with st.expander(label):
+            st.markdown(body_md)
 
 # ---------- Core calc ----------
 def compute_schedule(
@@ -199,12 +204,12 @@ with tab_deal:
     with c3:
         rate = st.number_input("Rate (×)", min_value=1.0, value=1.48, step=0.01, format="%.2f")
         st.caption("Computed Payback")
-        st.info(f"${funding * rate:,.2f}")
+        st.info(fmt_money(funding * rate))
     with c4:
         orig_pct = st.number_input("Origination Fee (% of Funding)", min_value=0.0, value=10.0, step=0.5, format="%.2f")
         orig_val = dollars(funding * (orig_pct / 100.0))
         st.caption("Origination $ (auto)")
-        st.info(f"${orig_val:,.2f}")
+        st.info(fmt_money(orig_val))
 
     c5, c6 = st.columns(2)
     with c5:
@@ -216,7 +221,7 @@ with tab_deal:
         )
         broker_val = dollars(funding * (broker_pct / 100.0))
         st.caption("Broker Commission $ (auto)")
-        st.info(f"${broker_val:,.2f}")
+        st.info(fmt_money(broker_val))
         st.caption("Charged to investors Day-1, proportional to their deal %.")
 
 # Syndicators tab
@@ -266,39 +271,52 @@ with tab_results:
     inp, fees, cap, client, inv = summaries["Inputs"], summaries["Fees"], summaries["Capnow"], summaries["Client"], summaries["Investors"]
 
     m1, m2, m3, m4, m5 = st.columns(5)
-    with m1: st.metric("Funding Amount", f"${inp['Funding Amount']:,.2f}")
-    with m2: st.metric("Payback (Funding × Rate)", f"${inp['Payback']:,.2f}")
-    with m3: st.metric("Daily Payment", f"${inp['Daily Payment']:,.2f}")
+    with m1: st.metric("Funding Amount", fmt_money(inp['Funding Amount']))
+    with m2: st.metric("Payback (Funding × Rate)", fmt_money(inp['Payback']))
+    with m3: st.metric("Daily Payment", fmt_money(inp['Daily Payment']))
     with m4: st.metric("Term Days", f"{inp['Term Days']} {'(Biz)' if inp['Business Days'] else '(Cal)'}")
-    with m5: st.metric("Merchant Nets", f"${client['Merchant Nets']:,.2f}")
+    with m5: st.metric("Merchant Nets", fmt_money(client['Merchant Nets']))
 
     f1, f2, f3, f4 = st.columns(4)
     with f1: st.metric("Origination % of Funding", f"{fees['Origination % of Funding (Day 1)']:.2f}%")
-    with f2: st.metric("Origination $ (Day 1 → Capnow)", f"${fees['Origination $ (Day 1 → Capnow)']:,.2f}")
-    with f3: st.metric("ACH $ (Day 1 → Capnow)", f"${fees['ACH Program $ (Day 1 → Capnow)']:,.2f}")
+    with f2: st.metric("Origination $ (Day 1 → Capnow)", fmt_money(fees['Origination $ (Day 1 → Capnow)']))
+    with f3: st.metric("ACH $ (Day 1 → Capnow)", fmt_money(fees['ACH Program $ (Day 1 → Capnow)']))
     with f4: st.metric("Broker % of Funding (Day 1 by Investors)", f"{fees['Broker % of Funding (Day 1 by Investors)']:.2f}%")
 
     c1, c2, c3 = st.columns(3)
-    with c1: st.metric("Capnow Upfront (Day 1)", f"${cap['Upfront (Day 1)']:,.2f}")
-    with c2: st.metric("Capnow Tracker Fees", f"${cap['Tracker Fees (over term)']:,.2f}")
-    with c3: st.metric("Capnow Total Revenue", f"${cap['Total Revenue']:,.2f}")
+    with c1: st.metric("Capnow Upfront (Day 1)", fmt_money(cap['Upfront (Day 1)']))
+    with c2: st.metric("Capnow Tracker Fees", fmt_money(cap['Tracker Fees (over term)']))
+    with c3: st.metric("Capnow Total Revenue", fmt_money(cap['Total Revenue']))
 
     st.markdown("#### Investor Results")
     cols = st.columns(len(inv))
     for i, (name, v) in enumerate(inv.items()):
         with cols[i]:
-            st.markdown(f"**{name}**")  # show the investor name once at the top
+            st.markdown(f"**{name}**")
             st.metric("% ON THE DEAL", f"{v['Deal %']:.2f}%")
-            st.metric("Invested Total $", f"${v['Invested Principal']:,.2f}")
-            st.metric("Commission Paid to Broker", f"${v['Broker Share (Day 1)']:,.2f}")
-            st.metric("CAFS on Deal", f"${v['Tracker Fees (Total → Capnow)']:,.2f}")
-            st.metric("TOTAL FEES", f"${v['Total Fees Paid']:,.2f}")
-            st.metric("Investment On Day 1", f"${v['Total Day-1 Cash Out']:,.2f}")
-            st.metric("Net on Investment", f"${v['Collections Net (after tracker)']:,.2f}")
-            st.metric("Profit on Investment", f"${v['Profit']:,.2f}")
+            st.metric("Invested Total $", fmt_money(v['Invested Principal']))
+            st.metric("Commission Paid to Broker", fmt_money(v['Broker Share (Day 1)']))
+            st.metric("CAFS on Deal", fmt_money(v['Tracker Fees (Total → Capnow)']))
+
+            # TOTAL FEES metric + click-to-open explainer
+            st.metric("TOTAL FEES", fmt_money(v['Total Fees Paid']))
+            info_pop(
+                "ℹ️ Click for TOTAL FEES breakdown",
+                f"""
+**TOTAL FEES** = **Commission Paid to Broker** + **CAFS on Deal**
+
+- Commission Paid to Broker (Day-1): **{fmt_money(v['Broker Share (Day 1)'])}**  
+- CAFS on Deal (tracker fees over term): **{fmt_money(v['Tracker Fees (Total → Capnow)'])}**  
+- **Total:** **{fmt_money(v['Total Fees Paid'])}**
+                """.strip()
+            )
+
+            st.metric("Investment On Day 1", fmt_money(v['Total Day-1 Cash Out']))
+            st.metric("Net on Investment", fmt_money(v['Collections Net (after tracker)']))
+            st.metric("Profit on Investment", fmt_money(v['Profit']))
             st.metric("ROI on Investment", f"{v['ROI_%']:.2f}%")
 
-    # Compact table: per-investor fees (renamed columns)
+    # Per-Investor Fees table
     st.markdown("### Per-Investor Fees")
     fees_rows = []
     for name, v in inv.items():
